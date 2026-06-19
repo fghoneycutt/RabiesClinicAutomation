@@ -1,0 +1,13 @@
+# Python environment & cache
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Local Playwright Session Storage (CRITICAL)
+*.json
+shelterluv_storage.json
+fi_nano_storage.json
+
+# Environment variables
+.env
