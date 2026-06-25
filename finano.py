@@ -78,16 +78,39 @@ def register_single_pet(page, animal):
     page.wait_for_timeout(1000)  # Give autocomplete and layout response ample room to resolve
     
     # --- NON-REGISTERED CHIP DETECTION GUARD ---
-    empty_state_selector = 'section[class*="_emptyChipList_"], h2:has-text("No results found")'
-    empty_state = page.locator(empty_state_selector)
+    empty_state_selector = 'section[class*="_emptyChipList_"], h2:has-text("No results found"), p:has-text("linked to your organization")'
+    empty_state = page.locator(empty_state_selector).first
     
+    try:
+        empty_state.wait_for(state="visible", timeout=1000)
+    except Exception:
+        pass
+
     if empty_state.count() > 0 and empty_state.is_visible():
-        log(f"🛑 [GUARD INTERCEPT] Microchip {chip_id} is not registered with Fi Nano organization pool. Closing tab context early.")
+        log(f"🛑 [GUARD INTERCEPT] Microchip {chip_id} is not linked to your organization pool. Closing tab context early.")
         try:
             page.close()
-        except Exception as ce:
-            log(f"⚠️ Warning encountered during early tab termination sequence: {str(ce)}")
-        return  # Drop out cleanly.
+        except Exception:
+            pass
+        return
+
+    # --- 🔥 ALREADY REGISTERED INTERCEPT GUARD ---
+    # Intercepts rows matching the explicit layout where status reads "Registered"
+    registered_badge = page.locator('span[class*="_statusActive_"]:text-is("Registered"), span:text-is("Registered")').first
+    
+    try:
+        # Check if the registration badge resolves instantly
+        registered_badge.wait_for(state="visible", timeout=1000)
+    except Exception:
+        pass
+
+    if registered_badge.count() > 0 and registered_badge.is_visible():
+        log(f"🛑 [GUARD INTERCEPT] Microchip {chip_id} is already fully active and registered in the system. Moving forward and closing tab.")
+        try:
+            page.close()  # Cleanly terminates the active row window context
+        except Exception:
+            pass
+        return  # Drops out of the loop function early
 
     # Locate table row matching the chip string and click it
     matching_cell = page.locator(f"div:text('{chip_id}'), span:text('{chip_id}')").first
@@ -116,8 +139,20 @@ def register_single_pet(page, animal):
     gender_label = "Female" if safe_str(animal.get("sex")).lower() == "female" else "Male"
     page.locator(f"span._radioText_4fvis_41:text-is('{gender_label}')").click()
     
-    # Optional Color Mapping Selection
-    fill_and_blur(page, 'input[name="color"]', animal.get("primary_color"))
+    # Optional Color Mapping Selection (Updated to include Pattern)
+    primary_color = safe_str(animal.get("primary_color"))
+    secondary_color = safe_str(animal.get("secondary_color"))
+    pattern = safe_str(animal.get("pattern"))
+
+    # Collect all non-empty color attributes into a list
+    color_parts = [part for part in [primary_color, secondary_color, pattern] if part]
+    
+    # Cleanly join them with a forward slash (e.g., "Black/Tan/Tricolor")
+    color_value = "/".join(color_parts)
+
+    fill_and_blur(page, 'input[name="color"]', color_value)
+
+    fill_and_blur(page, 'input[name="color"]', color_value)
     
     # Select Species Radio Group Element
     species_label = "Cat" if is_cat else "Dog"
