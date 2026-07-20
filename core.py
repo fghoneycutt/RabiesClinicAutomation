@@ -13,6 +13,8 @@ import csv
 # Import production Fi Nano integration layout module
 import finano
 
+from person_update import update_person_profile
+
 from people import (
     find_person,
     open_add_person_modal,
@@ -33,6 +35,41 @@ from vaccines import complete_vaccine
 
 STORAGE_STATE_PATH = "shelterluv_storage.json"
 
+def normalize_phone(value):
+    """
+    Converts phone values into Shelterluv display format:
+    (###) ###-####
+    
+    Handles:
+    - integers from Excel
+    - raw digits
+    - already formatted numbers
+    - dashed/spaced formats
+    """
+
+    if value is None:
+        return ""
+
+    raw = str(value).strip()
+
+    if raw.lower() in ["", "nan", "none"]:
+        return ""
+
+    # Remove Excel artifact
+    if raw.endswith(".0"):
+        raw = raw[:-2]
+
+    # Keep digits only
+    digits = "".join(
+        c for c in raw
+        if c.isdigit()
+    )
+
+    # Basic US phone validation
+    if len(digits) != 10:
+        return raw
+
+    return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
 
 # ==============================================================================
 # MAIN ENTRY
@@ -147,11 +184,12 @@ def run_automation(input_file, log=print):
 
         for r in rows:
             key = (
-                (r.get("person_first_name") or "").strip(),
-                (r.get("person_last_name") or "").strip(),
-                (r.get("phone") or "").strip(),
-                (r.get("address") or "").strip().lower(),
+                str(r.get("person_first_name") or "").strip(),
+                str(r.get("person_last_name") or "").strip(),
+                normalize_phone(r.get("phone")),
+                str(r.get("address") or "").strip().lower(),
             )
+
             grouped[key].append(r)
 
         return grouped
@@ -200,12 +238,18 @@ def run_automation(input_file, log=print):
             log_safe(f"\n👤 Processing owner entity: {first} {last} ({len(animals)} records)")
 
             is_new_person = False
-            profile_url = find_person(page, first, last, data=animals[0], log=log_safe)
+            person_match = find_person(
+                page,
+                first,
+                last,
+                data=animals[0],
+                log=log_safe
+            )
 
             # --------------------------------------------------------------------------
             # CREATE PERSON IF MISSING
             # --------------------------------------------------------------------------
-            if not profile_url:
+            if not person_match:
                 is_new_person = True
                 data = animals[0]
 
@@ -222,9 +266,22 @@ def run_automation(input_file, log=print):
                 # --------------------------------------------------------------------------
                 # BASELINE NAV TO OWNER PROFILE SCREEN (ONLY FOR EXISTING PEOPLE)
                 # --------------------------------------------------------------------------
-                owner_profile_url = profile_url if profile_url.startswith("http") else f"https://new.shelterluv.com{profile_url}"
+                profile_url = person_match["profile_url"]
+
+                owner_profile_url = (
+                    profile_url
+                    if profile_url.startswith("http")
+                    else f"https://new.shelterluv.com{profile_url}"
+                )
                 page.goto(owner_profile_url)
                 page.wait_for_load_state("networkidle")
+                if person_match["needs_update"]:
+                    update_person_profile(
+                        page,
+                        animals[0],
+                        person_match["changes"],
+                        log_safe
+                    )
 
             # ==========================================================================
             # SUB-LOOP: ANIMAL PROCESSING

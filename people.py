@@ -80,9 +80,38 @@ def find_person(page, first, last, data, log):
 
             # 3. Apply validation guard rule: Name AND (Address OR Phone OR Email)
             if address_matched or phone_matched or email_matched:
+
                 profile_url = link.get_attribute("href")
-                log(f"🎯 Identity confirmed via verification points. Navigating to: {profile_url}")
-                return profile_url
+
+                changes = {
+                    "address": (
+                        target_address != "" and
+                        not address_matched
+                    ),
+
+                    "phone": (
+                        target_phone != "" and
+                        not phone_matched
+                    ),
+
+                    "email": (
+                        target_email != "" and
+                        not email_matched
+                    )
+                }
+
+                needs_update = any(changes.values())
+
+                log(
+                    f"🎯 Identity confirmed. "
+                    f"Updates required: {changes}"
+                )
+
+                return {
+                    "profile_url": profile_url,
+                    "needs_update": needs_update,
+                    "changes": changes
+                }
             else:
                 log(f"⚠️ Common-Name Collision Detected: A row matches '{search_query}' but contact metadata points differ. Evaluating next result...")
         except Exception as e:
