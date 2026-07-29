@@ -228,85 +228,48 @@ def complete_animal_form(page, animal, log):
 # ------------------------------------------------------------------------------
 def add_microchip(page, animal, log):
     raw_chip = animal.get("microchip_number")
+    raw_issuer = animal.get("microchip_issuer")
+
     chip_str = ""
     if raw_chip and str(raw_chip).strip().lower() not in ["nan", "", "none"]:
         try:
             chip_str = str(int(float(raw_chip)))
         except ValueError:
-            chip_str = str(raw_chip).strip().split('.')[0]
+            chip_str = str(raw_chip).strip().split(".")[0]
+
+    issuer_name = ""
+    if raw_issuer and str(raw_issuer).strip().lower() not in ["nan", "", "none"]:
+        issuer_name = str(raw_issuer).strip()
 
     try:
         issuer = page.locator('#identifyingInformation\\.microchip_issuer')
         issuer.wait_for(state="visible", timeout=8000)
-        
+
         if chip_str:
-            log(f"🔬 Microchip found: {chip_str}. Selecting Fi Nano.")
-            issuer.select_option("Fi Nano")
-            
+
+            # Default to Fi Nano if spreadsheet has no issuer
+            if not issuer_name:
+                issuer_name = "Fi Nano"
+
+            log(f"🔬 Microchip found: {chip_str}. Issuer: {issuer_name}")
+
+            try:
+                issuer.select_option(label=issuer_name)
+            except Exception:
+                log(f"⚠️ Unknown microchip issuer '{issuer_name}'. Selecting 'Other'.")
+                issuer.select_option(label="Other")
+
             chip_field = page.locator('#identifyingInformation\\.microchip_number')
             chip_field.wait_for(state="visible", timeout=8000)
             chip_field.fill(chip_str)
             chip_field.blur()
+
         else:
             log("🔬 No microchip found. Defaulting issuer to [Did Not Attempt to Scan].")
             issuer.select_option("[Did Not Attempt to Scan]")
-            
+
     except Exception as e:
         log(f"⚠️ Microchip block interaction failed: {str(e)}")
-
-
-# ==============================================================================
-# EXISTING RECORD MICROCHIP RECONCILIATION GUARD (PATHWAY B)
-# ==============================================================================
-def add_microchip_if_needed(page, animal, safe_click_fn, fill_livewire_fn, normalize_date_fn, log):
-    raw_target_chip = animal.get("microchip_number")
-    target_chip = ""
-    if raw_target_chip and str(raw_target_chip).strip().lower() not in ["nan", "", "none"]:
-        try:
-            target_chip = str(int(float(raw_target_chip)))
-        except ValueError:
-            target_chip = str(raw_target_chip).strip().split('.')[0]
-
-    if not target_chip:
-        log("ℹ️ No microchip listed in input spreadsheet for this animal. Skipping reconciliation.")
-        return False
-
-    chip_container = page.locator('fieldset[x-data*="microchips.0.number"]')
-    chip_display_button = chip_container.locator('button.inline-editable').first
-
-    if chip_display_button.count() > 0:
-        try:
-            chip_display_button.wait_for(state="visible", timeout=5000)
-            existing_chip = chip_display_button.inner_text().strip()
-            log(f"🔍 System Verification: Found existing system chip [{existing_chip}] vs Spreadsheet [{target_chip}]")
-
-            if existing_chip == target_chip:
-                log("✅ Chip numbers match perfectly. Bypassing edit updates and disabling Fi Nano flow.")
-                return False
-            else:
-                log("🔄 Chip mismatch detected! Updating Shelterluv profile to match spreadsheet input...")
-                
-                chip_display_button.click()
-                page.wait_for_timeout(400)
-
-                input_locator = chip_container.locator('input[data-cy="editable-field-microchips.0.number"]')
-                input_locator.wait_for(state="visible", timeout=5000)
-                input_locator.fill(target_chip)
-                page.wait_for_timeout(200)
-
-                confirm_btn = chip_container.locator('button[data-cy="edit-microchips.0.number-confirm"]')
-                confirm_btn.click()
-                
-                page.wait_for_load_state("networkidle")
-                log("✨ Inline profile microchip field update finalized. Enabling Fi Nano pipeline step.")
-                return True
-        except Exception as ex:
-            log(f"❌ Failed to inline-modify microchip record: {str(ex)}")
-            return True
-    else:
-        log("🔍 No active microchip element detected on this profile layout. Forcing fallback addition pipeline.")
-        return True
-
 
 # ------------------------------------------------------------------------------
 # INTAKE NEW SUBMITTER LAYER (PATHWAY A)

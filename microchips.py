@@ -1,9 +1,10 @@
 # ==============================================================================
-# Microchip Module (FIXED v5 - STREAMLINED COALESCE PIPELINE)
+# Microchip Module - Existing Animal Reconciliation
+# Supports:
+# - Existing chip detection
+# - Non-Fi manufacturers
+# - Add Microchip modal workflow
 # ==============================================================================
-
-import time
-
 
 def safe(v):
     if v is None:
@@ -11,104 +12,337 @@ def safe(v):
     return str(v).strip()
 
 
-def add_microchip_if_needed(page, animal, safe_click, fill_livewire, normalize_date, log):
+# ------------------------------------------------------------------------------
+# NORMALIZE MICROCHIP NUMBER
+# ------------------------------------------------------------------------------
+def normalize_microchip(value):
+    if not value:
+        return ""
 
-    raw_chip = animal.get("microchip_number")
-    
-    # Process and sanitize Excel float strings (e.g., '900262007514220.0' -> '900262007514220')
-    microchip = ""
-    if raw_chip and str(raw_chip).strip().lower() not in ["nan", "", "none"]:
-        try:
-            microchip = str(int(float(raw_chip)))
-        except ValueError:
-            microchip = str(raw_chip).strip().split('.')[0]
+    raw = str(value).strip()
 
-    if not microchip:
-        return page
+    if raw.lower() in ["nan", "", "none"]:
+        return ""
 
-    # =================================================
-    # 1. CHECK FOR MICROCHIP SECTION EXISTENCE
-    # =================================================
-    microchip_section = page.locator("text=Microchip Number")
+    try:
+        return str(int(float(raw)))
+    except Exception:
+        return raw.split(".")[0]
 
-    if microchip_section.count() > 0:
-        container = microchip_section.first.locator("xpath=ancestor::*[1]")
-        existing_text = safe(container.inner_text())
 
-        if existing_text:
-            log(f"🔍 Existing microchip block found: {existing_text}")
-            digits = "".join([c for c in existing_text if c.isdigit()])
+# ------------------------------------------------------------------------------
+# FIND EXISTING MICROCHIP
+# ------------------------------------------------------------------------------
+def get_existing_microchip(page, log):
 
-            if digits and microchip in digits:
-                log("🧬 Microchip already exists — skipping modal")
-                return page
+    try:
+        chip_buttons = page.locator(
+            'button.inline-editable'
+        )
 
-    # =================================================
-    # 2. OPEN MICROCHIP MODAL
-    # =================================================
-    log(f"🔬 Adding microchip to existing profile: {microchip}")
+        for i in range(chip_buttons.count()):
+            text = chip_buttons.nth(i).inner_text().strip()
 
-    safe_click(
-        page,
-        lambda: page.locator('[data-cy="addMicrochip"]'),
-        "microchip"
+            digits = "".join(
+                c for c in text
+                if c.isdigit()
+            )
+
+            # Microchips are typically 9-15 digits
+            if len(digits) >= 9:
+                log(
+                    f"🔍 Existing Shelterluv microchip detected: {digits}"
+                )
+                return digits
+
+    except Exception as e:
+        log(
+            f"⚠️ Existing microchip lookup failed: {str(e)}"
+        )
+
+    return ""
+
+
+# ------------------------------------------------------------------------------
+# ADD MICROCHIP MODAL
+# ------------------------------------------------------------------------------
+def add_microchip_modal(
+    page,
+    animal,
+    normalize_date,
+    log
+):
+
+    microchip = normalize_microchip(
+        animal.get("microchip_number")
     )
 
-    modal = page.locator("#modal-container")
-    modal.wait_for(state="visible", timeout=15000)
+    if not microchip:
+        return False
 
-    # =================================================
-    # 3. SELECT ISSUER (Fi Nano)
-    # =================================================
-    issuer = modal.locator('[data-cy="form.issuer"]')
-    options = issuer.locator("option")
+
+    log(
+        f"🔬 Opening Add Microchip modal for {microchip}"
+    )
+
+
+    # ----------------------------------------------------------
+    # OPEN MODAL
+    # ----------------------------------------------------------
+
+    add_button = page.locator(
+        '[data-cy="addMicrochip"]'
+    )
+
+    add_button.wait_for(
+        state="visible",
+        timeout=10000
+    )
+
+    add_button.click(
+        force=True
+    )
+
+
+    modal = page.locator(
+        "#modal-container"
+    )
+
+    modal.wait_for(
+        state="visible",
+        timeout=15000
+    )
+
+
+    # ----------------------------------------------------------
+    # SELECT ISSUER
+    # ----------------------------------------------------------
+
+    issuer_value = safe(
+        animal.get("microchip_issuer")
+    )
+
+
+    issuer = modal.locator(
+        '[data-cy="form.issuer"]'
+    )
+
+    issuer.wait_for(
+        state="visible",
+        timeout=10000
+    )
+
+
     selected = False
 
-    for i in range(options.count()):
-        label = safe(options.nth(i).inner_text())
-        if "fi nano" in label.lower():
-            issuer.select_option(label=label)
-            selected = True
-            break
 
-    if not selected and options.count() > 1:
-        issuer.select_option(label=safe(options.nth(1).inner_text()))
+    if issuer_value:
 
-    # =================================================
-    # 4. MICROCHIP NUMBER (DIRECT FILL)
-    # =================================================
-    number_input = modal.locator('[data-cy="form.number"]')
-    number_input.click()
-    number_input.fill(microchip)
+        options = issuer.locator("option")
+
+        for i in range(options.count()):
+
+            label = safe(
+                options.nth(i).inner_text()
+            )
+
+            if label.lower() == issuer_value.lower():
+
+                issuer.select_option(
+                    label=label
+                )
+
+                selected = True
+
+                log(
+                    f"🧬 Selected microchip issuer: {label}"
+                )
+
+                break
+
+
+    if not selected:
+
+        log(
+            "⚠️ Microchip issuer not found. Selecting Other."
+        )
+
+        try:
+            issuer.select_option(
+                label="Other"
+            )
+        except:
+            pass
+
+
+
+    # ----------------------------------------------------------
+    # MICROCHIP NUMBER
+    # ----------------------------------------------------------
+
+    number_input = modal.locator(
+        '[data-cy="form.number"]'
+    )
+
+    number_input.wait_for(
+        state="visible",
+        timeout=10000
+    )
+
+    number_input.fill(
+        microchip
+    )
+
     number_input.blur()
 
-    # =================================================
-    # 5. IMPLANT DATE (GUARANTEED EXCEL DATE PIPELINE)
-    # =================================================
-    # COALESCE ensures this cell always contains a real date (Vaccination or Clinic date)
-    implant_date = normalize_date(animal.get("date_vaccinated"))
 
-    date_input = modal.locator('[data-cy="forminserted_at"]')
-    date_input.click()
-    date_input.fill(implant_date)
-    date_input.blur()
-    page.wait_for_timeout(400)
 
-    log(f"📅 Implant date filled and blurred: {implant_date}")
+    # ----------------------------------------------------------
+    # IMPLANT DATE
+    # ----------------------------------------------------------
 
-    # =================================================
-    # 6. SAVE - WITH TIMEOUT BUFFERS
-    # =================================================
-    save_btn = modal.locator('button[data-cy="modal-save"]')
-    save_btn.wait_for(state="visible", timeout=15000)
-    
-    # A tiny wait allows the component's change/blur events to finish syncing
-    page.wait_for_timeout(400) 
-    
-    save_btn.click(force=True)
-    
-    # CHANGE THIS LINE: Wait for the modal wrapper to become HIDDEN, not detached
-    modal.wait_for(state="hidden", timeout=15000)
-    log("✅ Microchip successfully validated and saved")
+    implant_date = normalize_date(
+        animal.get("date_vaccinated")
+    )
 
-    return page
+
+    date_input = modal.locator(
+        '[data-cy="forminserted_at"]'
+    )
+
+    if date_input.count():
+
+        date_input.fill(
+            implant_date
+        )
+
+        date_input.blur()
+
+
+    log(
+        f"📅 Implant date entered: {implant_date}"
+    )
+
+
+    # ----------------------------------------------------------
+    # SAVE
+    # ----------------------------------------------------------
+
+    save_btn = modal.locator(
+        'button[data-cy="modal-save"]'
+    )
+
+    save_btn.wait_for(
+        state="visible",
+        timeout=15000
+    )
+
+    page.wait_for_timeout(
+        500
+    )
+
+    save_btn.click(
+        force=True
+    )
+
+
+    modal.wait_for(
+        state="hidden",
+        timeout=15000
+    )
+
+
+    log(
+        "✅ Microchip successfully added to existing animal"
+    )
+
+    return True
+
+
+
+# ------------------------------------------------------------------------------
+# MAIN ENTRY
+# ------------------------------------------------------------------------------
+def add_microchip_if_needed(
+    page,
+    animal,
+    safe_click,
+    fill_livewire,
+    normalize_date,
+    log
+):
+
+    target_chip = normalize_microchip(
+        animal.get("microchip_number")
+    )
+
+
+    # No chip in incoming data
+    if not target_chip:
+
+        log(
+            "ℹ️ No microchip provided. Skipping."
+        )
+
+        return False
+
+
+
+    existing_chip = get_existing_microchip(
+        page,
+        log
+    )
+
+
+    # ----------------------------------------------------------
+    # EXISTING CHIP MATCH
+    # ----------------------------------------------------------
+
+    if existing_chip:
+
+        if existing_chip == target_chip:
+
+            log(
+                "✅ Existing microchip matches input. No update needed."
+            )
+
+            return False
+
+
+        log(
+            f"⚠️ Microchip mismatch. Existing={existing_chip}, Incoming={target_chip}"
+        )
+
+        # Future reconciliation update path
+        return True
+
+
+
+    # ----------------------------------------------------------
+    # NO CHIP EXISTS
+    # ----------------------------------------------------------
+
+    log(
+        "🔍 No existing microchip found. Checking Add Microchip button."
+    )
+
+
+    if page.locator(
+        '[data-cy="addMicrochip"]'
+    ).count():
+
+        add_microchip_modal(
+            page,
+            animal,
+            normalize_date,
+            log
+        )
+
+        return True
+
+
+    log(
+        "⚠️ No existing chip and Add Microchip button unavailable."
+    )
+
+    return False

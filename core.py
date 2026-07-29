@@ -25,11 +25,12 @@ from animals import (
     find_or_open_animal,
     complete_animal_form,
     add_microchip,
-    add_microchip_if_needed,
     submit_animal,
     open_animal,
     animal_name_matches
 )
+
+from microchips import add_microchip_if_needed
 
 from vaccines import complete_vaccine
 
@@ -347,9 +348,9 @@ def run_automation(input_file, log=print):
                     should_register_fi = add_microchip_if_needed(
                         page=animal_profile_tab,
                         animal=animal,
-                        safe_click_fn=safe_click,
-                        fill_livewire_fn=fill_livewire,
-                        normalize_date_fn=normalize_date,
+                        safe_click=safe_click,
+                        fill_livewire=fill_livewire,
+                        normalize_date=normalize_date,
                         log=log_safe
                     )
 
@@ -374,29 +375,48 @@ def run_automation(input_file, log=print):
                 # CONDITIONAL PRODUCTION INTEGRATION STEP: FI NANO WIRE-UP
                 # ==========================================================================
                 chip_id = str(animal.get("microchip_number", "")).strip()
-                
-                if chip_id and chip_id.lower() != "none" and should_register_fi:
-                    log_safe(f"📡 Microchip workflow activated [{chip_id}]. Opening shared Fi Nano tab...")
+                chip_issuer = str(animal.get("microchip_issuer", "")).strip()
+
+                should_register_with_fi = (
+                    chip_id
+                    and chip_id.lower() != "none"
+                    and chip_issuer.lower() == "fi nano"
+                    and should_register_fi
+                )
+
+                if should_register_with_fi:
+                    log_safe(f"📡 Fi Nano workflow activated [{chip_id}]. Opening shared Fi Nano tab...")
                     try:
                         # Request the clean page tab in the shared window context
                         fi_page = finano.get_fi_page_in_shared_context(context)
                         fi_page.bring_to_front()
-                        
+
                         # Process registration form sequence
                         finano.register_single_pet(fi_page, animal)
-                        
+
                         # Close the tracking page tab context explicitly
                         log_safe(f"🛡️ Closing Fi Nano tab context for {target_name}.")
                         fi_page.close()
+
                     except Exception as fi_err:
                         log_safe(f"❌ Automation workflow failed or timed out on Fi Nano interface: {str(fi_err)}")
+
                     finally:
-                        page.bring_to_front()  # Ensure Shelterluv recaptures active focal display
+                        page.bring_to_front()
+
                 else:
-                    if not should_register_fi:
-                        log_safe(f"🛑 Bypassing Fi Nano: Microchip already matched the existing record (or rejected as duplicate). No registration required.")
-                    else:
+                    if not chip_id or chip_id.lower() == "none":
                         log_safe(f"ℹ️ No microchip data assigned for {target_name}. Bypassing Fi Nano tracking window.")
+
+                    elif chip_issuer.lower() != "fi nano":
+                        log_safe(
+                            f"ℹ️ Microchip issuer is '{chip_issuer}'. Fi Nano registration not required."
+                        )
+
+                    elif not should_register_fi:
+                        log_safe(
+                            "🛑 Bypassing Fi Nano: Microchip already matched the existing record (or rejected as duplicate). No registration required."
+                        )
 
             # --------------------------------------------------------------------------
             # CLEAN RETURN TO DASHBOARD AFTER ALL WORK ENTITIES COMPLETED FOR THIS PERSON
