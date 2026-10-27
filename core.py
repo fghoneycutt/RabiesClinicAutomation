@@ -34,6 +34,8 @@ from microchips import add_microchip_if_needed
 
 from vaccines import complete_vaccine
 
+from certificate_email import email_latest_rabies_certificate
+
 STORAGE_STATE_PATH = "shelterluv_storage.json"
 
 def normalize_phone(value):
@@ -75,7 +77,11 @@ def normalize_phone(value):
 # ==============================================================================
 # MAIN ENTRY
 # ==============================================================================
-def run_automation(input_file, log=print):
+def run_automation(
+    input_file,
+    log=print,
+    send_certificate_emails=False
+):
 
     # --------------------------------------------------------------------------
     # logging wrapper
@@ -354,17 +360,64 @@ def run_automation(input_file, log=print):
                         log=log_safe
                     )
 
+               
                 # ==========================================================================
-                # SHARED UNIFIED TRACK: VACCINES (Runs inside separate animal profile tab)
+                # SHARED UNIFIED TRACK: VACCINES
                 # ==========================================================================
                 animal_profile_tab.bring_to_front()
-                complete_vaccine(
+
+                vaccine_submitted = complete_vaccine(
                     page=animal_profile_tab,
                     animal=animal,
                     safe_click=safe_click,
                     fill_livewire=fill_livewire,
                     log=log_safe
                 )
+
+                # ==========================================================================
+                # OPTIONAL: EMAIL MOST RECENT RABIES CERTIFICATE
+                # ==========================================================================
+                if send_certificate_emails and vaccine_submitted:
+                    owner_email = str(animal.get("email", "")).strip()
+
+                    if owner_email and owner_email.lower() not in ("none", "nan"):
+                        try:
+                            email_latest_rabies_certificate(
+                                page=animal_profile_tab,
+                                email=owner_email,
+                                log=log_safe
+                            )
+                        except Exception as email_err:
+                            log_safe(
+                                f"⚠️ Certificate email failed for {target_name}: "
+                                f"{email_err}"
+                            )
+                            log_safe("➡️ Continuing the remaining automation.")
+                    else:
+                        log_safe(
+                            f"ℹ️ No owner email address for {target_name}. "
+                            "Skipping certificate email."
+                        )
+
+                elif send_certificate_emails:
+                    log_safe(
+                        f"ℹ️ No confirmed vaccine submission for {target_name}. "
+                        "Skipping certificate email."
+                    )
+
+                else:
+                    log_safe("ℹ️ Certificate emailing is disabled.")
+
+                # ==========================================================================
+                # CLOSE ANIMAL PROFILE TAB
+                # ==========================================================================
+                log_safe(
+                    f"🛡️ Closing animal tab context for {target_name}. "
+                    f"Reverting tracking focus."
+                )
+                animal_profile_tab.close()
+                page.bring_to_front()
+
 
                 # Explicitly close out the temporary animal tab context and return control to Owner context
                 log_safe(f"🛡️ Closing animal tab context for {target_name}. Reverting tracking focus.")

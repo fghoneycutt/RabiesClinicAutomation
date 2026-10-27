@@ -2,6 +2,8 @@
 # People Module (MULTI-POINT COLLISION DEDUPLICATION ENGINE - 2026)
 # ==============================================================================
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 def safe(v):
     return "" if v is None else str(v)
 
@@ -224,8 +226,69 @@ def submit_add_person(page, log):
     btn.wait_for(state="visible", timeout=10000)
     btn.click()
 
-    page.wait_for_selector("#modal-container", state="hidden", timeout=20000)
+    # Check whether Shelterluv rejected the email address.
+    email_error = page.locator("#email-error")
 
+    try:
+        email_error.wait_for(state="visible", timeout=2500)
+
+    except PlaywrightTimeoutError:
+        # No email validation error appeared.
+        # Require the modal to close normally before confirming success.
+        page.wait_for_selector(
+            "#modal-container",
+            state="hidden",
+            timeout=20000
+        )
+
+    else:
+        # ----------------------------------------------------------------------
+        # EMAIL REJECTED: RETRY WITHOUT AN EMAIL ADDRESS
+        # ----------------------------------------------------------------------
+        error_text = email_error.inner_text().strip()
+
+        log(f"⚠️ Shelterluv rejected the email address: {error_text}")
+        log("➡️ Selecting 'No email provided' and retrying person creation.")
+
+        # Clear the rejected email address, if the input is available.
+        email_input = page.locator('[data-cy="email"]')
+
+        if email_input.count() and email_input.is_enabled():
+            email_input.fill("")
+
+        # Check the No email provided checkbox.
+        no_email_checkbox = page.locator("#emailRefused-input")
+        no_email_checkbox.wait_for(state="visible", timeout=10000)
+
+        if not no_email_checkbox.is_checked():
+            no_email_checkbox.check()
+
+        log("☑️ 'No email provided' selected.")
+
+        # Wait for any reactive validation message to clear.
+        try:
+            email_error.wait_for(state="hidden", timeout=5000)
+        except PlaywrightTimeoutError:
+            # The message may remain rendered while the form updates.
+            # Proceed with the retry; the final modal wait will catch failure.
+            pass
+
+        # Click Add Person again.
+        btn.wait_for(state="visible", timeout=10000)
+        btn.click()
+
+        log("🔁 Resubmitted Add Person form without an email address.")
+
+        # The second submission must succeed by closing the modal.
+        page.wait_for_selector(
+            "#modal-container",
+            state="hidden",
+            timeout=20000
+        )
+
+    # --------------------------------------------------------------------------
+    # CONFIRM THE PAGE HAS STABILIZED
+    # --------------------------------------------------------------------------
     page.wait_for_function("""
         () => {
             return document.querySelector('[data-cy="associated-animal"]')

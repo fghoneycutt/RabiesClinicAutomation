@@ -271,6 +271,7 @@ def add_microchip(page, animal, log):
     except Exception as e:
         log(f"⚠️ Microchip block interaction failed: {str(e)}")
 
+
 # ------------------------------------------------------------------------------
 # INTAKE NEW SUBMITTER LAYER (PATHWAY A)
 # ------------------------------------------------------------------------------
@@ -281,32 +282,91 @@ def submit_animal(page, log):
     btn.wait_for(state="visible", timeout=15000)
     btn.click()
 
-    duplicate_alert = page.locator('div[role="alert"]:has-text("This microchip number already exists on another animal record")')
+    duplicate_alert = page.locator(
+        'div[role="alert"]:has-text("This microchip number already exists on another animal record")'
+    )
+
+    microchip_error = page.locator(
+        '#identifyingInformation\\.microchip_number-error'
+    )
+
     form_anchor = page.locator('#animalInformation\\.animal_name')
 
     should_register_fi = True
+    microchip_length_retry_used = False
+    duplicate_retry_used = False
 
-    for _ in range(25):
+    for _ in range(100):
+        # Successful submission: the animal intake form has disappeared.
         if form_anchor.count() == 0 or not form_anchor.is_visible():
             log("🎉 Animal intake submitted successfully (Form closed)")
             return should_register_fi
 
-        if duplicate_alert.count() > 0 and duplicate_alert.is_visible():
-            log("⚠️ System Collision Guard: Detected a duplicate microchip alert box presence!")
-            log("🔘 Reverting Microchip Issuer selection parameters to [Did Not Attempt to Scan]...")
-            
-            issuer = page.locator('#identifyingInformation\\.microchip_issuer')
-            issuer.select_option("[Did Not Attempt to Scan]")
+        # --------------------------------------------------------------
+        # INVALID MICROCHIP LENGTH
+        # --------------------------------------------------------------
+        if (
+            not microchip_length_retry_used
+            and microchip_error.count() > 0
+            and microchip_error.is_visible()
+        ):
+            error_text = microchip_error.inner_text().strip()
+
+            if "Microchips must be 9, 10, or 15 digits" in error_text:
+                log(f"⚠️ Invalid microchip number: {error_text}")
+                log("➡️ Changing Microchip Issuer to [None Found].")
+
+                issuer = page.locator(
+                    '#identifyingInformation\\.microchip_issuer'
+                )
+                issuer.wait_for(state="visible", timeout=8000)
+                issuer.select_option(label="[None Found]")
+
+                page.wait_for_timeout(300)
+
+                microchip_length_retry_used = True
+                should_register_fi = False
+
+                log("🚀 Retrying animal submission without a registered microchip.")
+                btn.wait_for(state="visible", timeout=10000)
+                btn.click()
+                page.wait_for_timeout(300)
+                continue
+
+        # --------------------------------------------------------------
+        # DUPLICATE MICROCHIP
+        # --------------------------------------------------------------
+        if (
+            not duplicate_retry_used
+            and duplicate_alert.count() > 0
+            and duplicate_alert.is_visible()
+        ):
+            log("⚠️ System Collision Guard: Duplicate microchip detected.")
+            log("🔘 Changing Microchip Issuer to [Did Not Attempt to Scan].")
+
+            issuer = page.locator(
+                '#identifyingInformation\\.microchip_issuer'
+            )
+            issuer.select_option(label="[Did Not Attempt to Scan]")
             page.wait_for_timeout(300)
-            
+
             should_register_fi = False
-            
-            log("🚀 Retrying form submission execution track...")
+            duplicate_retry_used = True
+
+            log("🚀 Retrying animal submission after duplicate-microchip guard.")
+            btn.wait_for(state="visible", timeout=10000)
             btn.click()
-            break
-            
+            page.wait_for_timeout(300)
+            continue
+
         page.wait_for_timeout(200)
 
-    form_anchor.wait_for(state="detached", timeout=20000)
-    log("🎉 Animal intake finalized successfully after guard interception handling")
+    # Do not silently treat a form that remains open as a successful submission.
+    if form_anchor.count() > 0 and form_anchor.is_visible():
+        raise TimeoutError(
+            "Animal intake form remained open after submission attempts. "
+            "Check Shelterluv for validation errors."
+        )
+
+    log("🎉 Animal intake finalized successfully.")
     return should_register_fi

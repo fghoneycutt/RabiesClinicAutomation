@@ -66,7 +66,7 @@ def complete_vaccine(
     # --------------------------------------------------------------------------
     if not vaccine_product or vaccine_product.lower() in ["nan", "", "nat", "none"]:
         log("ℹ️ Skipping vaccine entry: No product data specified for this record line item.")
-        return page
+        return False
 
     log("💉 Opening vaccine flow")
 
@@ -146,9 +146,8 @@ def complete_vaccine(
         log(f"🧬 Selected fallback match: {fallback_match.inner_text().strip()}")
 
     else:
-        log("⚠️ No matching vaccine found — selecting first option as fallback")
-        if options.count() > 0:
-            options.first.click()
+        log("❌ No matching vaccine found. Skipping vaccine submission.")
+        return False
 
     # -------------------------
     # OTHER FIELDS (NOW USING SANITIZED INT STRINGS)
@@ -192,14 +191,22 @@ def complete_vaccine(
         staff.select_option(label="Community Veterinarian")
 
     # -------------------------
-    # SUBMIT
+    # SUBMIT AND VERIFY
     # -------------------------
     save_btn = modal.locator('button[data-cy="modal-save"]')
     save_btn.wait_for(state="visible", timeout=15000)
     save_btn.click(force=True)
 
-    page.wait_for_timeout(1200)
+    try:
+        # A successful save should close the Complete Vaccine modal.
+        modal.wait_for(state="hidden", timeout=10000)
 
-    log("✅ Vaccine completed")
+        log("✅ Vaccine submitted successfully")
+        return True
 
-    return page
+    except Exception as err:
+        log(
+            "❌ Vaccine submission could not be confirmed. "
+            f"Certificate email will be skipped. Details: {err}"
+        )
+        return False

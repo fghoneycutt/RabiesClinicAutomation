@@ -12,6 +12,7 @@ class App:
         self.root.geometry("700x500")
 
         self.file_path = tk.StringVar()
+        self.send_emails_var = tk.BooleanVar(value=False)
         self.running = False
 
         # FILE PICKER
@@ -20,9 +21,23 @@ class App:
         file_frame = tk.Frame(root)
         file_frame.pack(fill="x", padx=10)
 
-        tk.Entry(file_frame, textvariable=self.file_path).pack(side="left", fill="x", expand=True)
+        tk.Entry(
+            file_frame,
+            textvariable=self.file_path
+        ).pack(side="left", fill="x", expand=True)
 
-        tk.Button(file_frame, text="Browse", command=self.browse_file).pack(side="left", padx=5)
+        tk.Button(
+            file_frame,
+            text="Browse",
+            command=self.browse_file
+        ).pack(side="left", padx=5)
+
+        # OPTIONAL CERTIFICATE EMAIL CHECKBOX
+        tk.Checkbutton(
+            root,
+            text="Email latest rabies certificate to owner after vaccine entry",
+            variable=self.send_emails_var
+        ).pack(anchor="w", padx=10, pady=5)
 
         # START BUTTON
         self.start_btn = tk.Button(
@@ -47,38 +62,68 @@ class App:
             self.file_path.set(file)
 
     def log(self, msg):
+        # Schedule GUI updates on Tkinter's main thread.
+        self.root.after(0, self._append_log, str(msg))
+
+    def _append_log(self, msg):
         self.log_box.insert(tk.END, msg + "\n")
         self.log_box.see(tk.END)
-        self.root.update_idletasks()
 
-    def run_worker(self):
+    def run_worker(self, input_file, send_emails):
         try:
-            self.running = True
-            self.root.after(0, lambda: self.start_btn.config(state="disabled"))
-
             self.log("🚀 Starting automation...\n")
 
-            run_automation(self.file_path.get(), self.log)
+            self.log(
+                "📧 Certificate emailing: "
+                + ("ENABLED" if send_emails else "DISABLED")
+            )
+
+            run_automation(
+                input_file,
+                log=self.log,
+                send_certificate_emails=send_emails
+            )
 
             self.log("\n✅ COMPLETE — all records processed")
 
         except Exception as e:
             self.log(f"\n❌ ERROR: {str(e)}")
-            messagebox.showerror("Error", str(e))
+            self.root.after(
+                0,
+                lambda error=str(e): messagebox.showerror("Error", error)
+            )
 
         finally:
             self.running = False
-            self.root.after(0, lambda: self.start_btn.config(state="normal"))
+            self.root.after(
+                0,
+                lambda: self.start_btn.config(state="normal")
+            )
 
     def start(self):
         if self.running:
             return
 
-        if not self.file_path.get():
-            messagebox.showwarning("Missing File", "Please select a file first.")
+        input_file = self.file_path.get().strip()
+
+        if not input_file:
+            messagebox.showwarning(
+                "Missing File",
+                "Please select a file first."
+            )
             return
 
-        thread = threading.Thread(target=self.run_worker, daemon=True)
+        # Read GUI settings on the main thread before starting the worker.
+        send_emails = self.send_emails_var.get()
+
+        self.running = True
+        self.start_btn.config(state="disabled")
+
+        thread = threading.Thread(
+            target=self.run_worker,
+            args=(input_file, send_emails),
+            daemon=True
+        )
         thread.start()
 
 

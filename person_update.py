@@ -350,6 +350,7 @@ def update_phone(
     )
 
 
+
 # ==============================================================================
 # EMAIL UPDATE
 # ==============================================================================
@@ -360,17 +361,17 @@ def update_email(
     log
 ):
     """
-    Opens Shelterluv Edit Email modal and replaces
-    existing email address with incoming data.
+    Opens Shelterluv Edit Email modal and replaces the existing email.
+
+    If Shelterluv rejects the email address, cancel the modal and
+    continue the automation without updating the email.
     """
 
     log("📧 Email difference detected. Updating email...")
 
-
     # --------------------------------------------------------------------------
     # OPEN EMAIL MODAL
     # --------------------------------------------------------------------------
-
     email_button = page.locator(
         'button[wire\\:click="editEmail"]'
     )
@@ -382,48 +383,40 @@ def update_email(
 
     email_button.click()
 
-
     # --------------------------------------------------------------------------
     # WAIT FOR EMAIL MODAL
     # --------------------------------------------------------------------------
+    email_input = page.locator('[data-cy="email"]')
 
-    page.wait_for_selector(
-        '[data-cy="email"]',
+    email_input.wait_for(
         state="visible",
         timeout=10000
     )
 
+    # --------------------------------------------------------------------------
+    # VALIDATE INPUT AVAILABILITY
+    # --------------------------------------------------------------------------
+    email = safe(data.get("email")).strip()
+
+    if not email or email.lower() in ("nan", "none", "nat"):
+        log("⚠️ No email value supplied. Skipping email update.")
+
+        cancel_button = page.locator(
+            'button[data-cy="modal-cancel"]'
+        )
+        cancel_button.click()
+        return
 
     # --------------------------------------------------------------------------
     # FILL EMAIL
     # --------------------------------------------------------------------------
+    email_input.fill(email)
 
-    email = safe(
-        data.get("email")
-    ).strip()
-
-
-    if not email:
-        log(
-            "⚠️ No email value supplied. Skipping email update."
-        )
-        return
-
-
-    page.locator(
-        '[data-cy="email"]'
-    ).fill(email)
-
-
-    log(
-        f"✍️ Email prepared: {email}"
-    )
-
+    log(f"✍️ Email prepared: {email}")
 
     # --------------------------------------------------------------------------
     # SAVE
     # --------------------------------------------------------------------------
-
     save_button = page.locator(
         '[data-cy="modal-save"]'
     )
@@ -435,10 +428,56 @@ def update_email(
 
     save_button.click()
 
+    # --------------------------------------------------------------------------
+    # CHECK FOR SHELTERLUV EMAIL VALIDATION ERROR
+    # --------------------------------------------------------------------------
+    email_error = page.locator("#email-error")
 
-    page.wait_for_timeout(1500)
+    try:
+        email_error.wait_for(
+            state="visible",
+            timeout=2500
+        )
 
+        error_text = email_error.inner_text().strip()
 
-    log(
-        "✅ Email successfully updated."
+        log(
+            f"⚠️ Shelterluv rejected email '{email}': "
+            f"{error_text}"
+        )
+        log("➡️ Cancelling email edit and continuing automation.")
+
+        cancel_button = page.locator(
+            'button[data-cy="modal-cancel"]'
+        )
+
+        cancel_button.wait_for(
+            state="visible",
+            timeout=5000
+        )
+        cancel_button.click()
+
+        # Confirm the modal has closed before proceeding.
+        email_input.wait_for(
+            state="hidden",
+            timeout=10000
+        )
+
+        log("↩️ Email update cancelled. Continuing with remaining work.")
+        return
+
+    except Exception as err:
+        # A timeout means the validation error did not appear.
+        # Other failures should not be mistaken for a successful save.
+        if email_error.is_visible():
+            raise
+
+    # --------------------------------------------------------------------------
+    # CONFIRM MODAL CLOSED AFTER SAVE
+    # --------------------------------------------------------------------------
+    email_input.wait_for(
+        state="hidden",
+        timeout=10000
     )
+
+    log("✅ Email successfully updated.")
