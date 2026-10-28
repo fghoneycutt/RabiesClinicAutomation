@@ -76,7 +76,10 @@ def select_typeahead(page, field_id, value, log=None):
         if container.count() == 0:
             # Fallback if field_id maps to an un-wrapped custom component context
             escaped_id = field_id.replace(".", "\\.")
-            container = page.locator(f"div:has(> #{escaped_id}), fieldset:has(# {escaped_id})").first
+
+            container = page.locator(
+                f'div:has(> #{escaped_id}), fieldset:has(#{escaped_id})'
+            ).first
             if container.count() == 0:
                 container = page
 
