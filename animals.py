@@ -133,6 +133,73 @@ def select_typeahead(page, field_id, value, log=None):
         except:
             pass
 
+# ------------------------------------------------------------------------------
+# WEIGHT AND DOG SIZE
+# ------------------------------------------------------------------------------
+def enter_animal_weight(page, animal, log):
+    raw_weight = animal.get("weight")
+
+    # Weight is optional.
+    if raw_weight is None or str(raw_weight).strip().lower() in [
+        "", "nan", "none"
+    ]:
+        log("⚖️ No weight provided. Skipping weight entry.")
+        return
+
+    try:
+        weight = float(raw_weight)
+
+        if weight < 0 or weight > 999999:
+            log(f"⚠️ Weight out of range: {raw_weight}. Skipping weight entry.")
+            return
+
+        # Enter weight.
+        weight_field = page.locator(
+            '#animalInformation\\.weight_amount'
+        )
+        weight_field.wait_for(state="visible", timeout=8000)
+        weight_field.fill(str(weight))
+
+        # Always select pounds.
+        weight_units = page.locator('#unit')
+        weight_units.wait_for(state="visible", timeout=8000)
+        weight_units.select_option("lbs")
+
+        log(f"⚖️ Entered animal weight: {weight:g} lbs")
+
+    except (ValueError, TypeError):
+        log(f"⚠️ Invalid weight value '{raw_weight}'. Skipping weight entry.")
+        return
+    except Exception as e:
+        log(f"⚠️ Could not enter animal weight: {e}")
+        return
+
+    # Calculate dog size from weight, only for dogs.
+    species = str(animal.get("species") or "").strip().lower()
+
+    if species != "dog":
+        return
+
+    if weight <= 24:
+        dog_size = "Small (0-24)"
+    elif weight <= 59:
+        dog_size = "Medium (25-59)"
+    elif weight <= 99:
+        dog_size = "Large (60-99)"
+    else:
+        dog_size = "Extra-Large (100+)"
+
+    try:
+        size_field = page.locator(
+            '#animalInformation\\.dog_size_group'
+        )
+        size_field.wait_for(state="visible", timeout=8000)
+        size_field.select_option(label=dog_size)
+
+        log(f"🐕 Calculated dog size: {dog_size} ({weight:g} lbs)")
+
+    except Exception as e:
+        log(f"⚠️ Could not select dog size '{dog_size}': {e}")
 
 # ------------------------------------------------------------------------------
 # MAIN FIND OR CREATE FLOW
@@ -199,6 +266,34 @@ def complete_animal_form(page, animal, log):
         page.locator('[data-cy="animalInformation.sex-Male"]').check()
     elif sex == "female":
         page.locator('[data-cy="animalInformation.sex-Female"]').check()
+
+    # ALTERED STATUS
+    altered_status = animal.get("altered_status")
+
+    if altered_status is not None:
+        status = str(altered_status).strip().lower()
+
+        if status in ("true", "1", "yes"):
+            page.locator(
+                '[data-cy="animalInformation.altered_before_arrival-Yes"]'
+            ).check()
+            log("✅ Altered Before Arrival: Yes")
+
+        elif status in ("false", "0", "no"):
+            page.locator(
+                '[data-cy="animalInformation.altered_before_arrival-No"]'
+            ).check()
+            log("✅ Altered Before Arrival: No")
+
+        else:
+            log(
+                f"ℹ️ Unrecognized altered_status '{altered_status}'. "
+                "Leaving Unknown selected."
+            )
+    else:
+        log("ℹ️ No altered_status provided. Leaving Unknown selected.")
+
+    enter_animal_weight(page, animal, log)
 
     if animal.get("primary_color"):
         page.locator('#animalInformation\\.primary_color').select_option(animal["primary_color"])
