@@ -73,7 +73,13 @@ def complete_vaccine(
     # -------------------------
     # NAVIGATION
     # -------------------------
-    safe_click(page, lambda: page.locator('[data-cy="medical-tab"]'), "medical")
+    safe_click(
+        page,
+        lambda: page.locator(
+            '[data-cy="medical-tab"][wire\\:key="record-tab-medical"]'
+        ),
+        "medical"
+    )
     safe_click(page, lambda: page.locator('button[tabname="vaccines"]'), "vaccines")
     safe_click(page, lambda: page.locator('button:has-text("Complete Vaccine")'), "open vaccine modal")
 

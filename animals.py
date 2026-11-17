@@ -64,74 +64,78 @@ def open_animal(page, context, link_element):
 # ------------------------------------------------------------------------------
 # TYPEAHEAD
 # ------------------------------------------------------------------------------
+
 def select_typeahead(page, field_id, value, log=None):
     if not value or str(value).strip().lower() in ["nan", "", "none"]:
-        return
+        return True
 
     clean_value = str(value).strip()
 
     try:
-        # 1. Scope all execution strictly within the specific wrapper element
-        container = page.locator(f'[data-scroll-to="{field_id}"]')
-        if container.count() == 0:
-            # Fallback if field_id maps to an un-wrapped custom component context
-            escaped_id = field_id.replace(".", "\\.")
+        # Locate the exact typeahead button by its unique ID.
+        trigger = page.locator(f'[id="{field_id}"]')
 
-            container = page.locator(
-                f'div:has(> #{escaped_id}), fieldset:has(#{escaped_id})'
-            ).first
-            if container.count() == 0:
-                container = page
+        trigger.wait_for(state="visible", timeout=10000)
+        trigger.click()
 
-        # 2. Find and click the trigger button inside this specific container
-        dropdown_trigger = container.locator(f"button, [id='{field_id}']").first
-        dropdown_trigger.wait_for(state="visible", timeout=10000)
-        dropdown_trigger.click()
-        page.wait_for_timeout(600)
+        page.wait_for_timeout(500)
 
-        # 3. Target the search field specifically inside this container context
-        search_input = container.locator('input[x-ref="searchBox"], input[type="search"]').first
-        
-        # Fallback to focused element if the modal/dropdown layer detaches dynamically
-        if search_input.count() == 0 or not search_input.is_visible():
-            search_input = page.locator('input[x-ref="searchBox"]:focus, input[type="search"]:focus').first
+        # Some typeahead fields expose a separate search input.
+        search_input = page.locator(
+            'input[x-ref="searchBox"]:visible, input[type="search"]:visible'
+        ).first
 
-        if search_input.count() > 0 and search_input.is_visible():
-            search_input.clear()
+        if search_input.count() > 0:
             search_input.fill(clean_value)
-            page.wait_for_timeout(600)
-
-        # 4. Extract options matching the clean text pattern inside the container context
-        regex_pattern = f"/^\\s*{clean_value}\\s*$/i"
-
-        option_match = container.locator(f'[role="option"] >> text={regex_pattern}').first
-        if option_match.count() == 0 or not option_match.is_visible():
-            option_match = container.locator(f'div >> text={regex_pattern}').first
-            
-        # Fallback to page level matching if Alpine opens a global portal layout layer
-        if option_match.count() == 0 or not option_match.is_visible():
-            option_match = page.locator(f'[role="option"] >> text={regex_pattern}').first
-
-        # 5. Click option if explicitly visible; otherwise step select via keyboard route
-        if option_match.count() > 0 and option_match.is_visible():
-            option_match.click()
         else:
-            page.keyboard.press("ArrowDown")
-            page.wait_for_timeout(200)
-            page.keyboard.press("Enter")
-            
-        page.wait_for_timeout(800)
+            # The button itself handles keyboard input.
+            page.keyboard.type(clean_value, delay=50)
+
+        page.wait_for_timeout(700)
+
+        # Look for visible options anywhere on the page.
+        options = page.locator('[role="option"]:visible')
+
+        exact_match = None
+        partial_match = None
+
+        for i in range(options.count()):
+            option = options.nth(i)
+            option_text = option.inner_text().strip()
+
+            if option_text.lower() == clean_value.lower():
+                exact_match = option
+                break
+
+            if clean_value.lower() in option_text.lower():
+                partial_match = option
+
+        selected_option = exact_match or partial_match
+
+        if selected_option:
+            selected_text = selected_option.inner_text().strip()
+            selected_option.click()
+
+            page.wait_for_timeout(500)
+
+            log(
+                f"✅ Selected {field_id}: {selected_text}"
+            ) if log else None
+
+            return True
+
+        raise Exception(
+            f"No matching option found for '{clean_value}'"
+        )
 
     except Exception as e:
         if log:
-            log(f"⚠️ Typeahead component selection fallback on {field_id} ('{clean_value}'): {str(e)}")
-        try:
-            page.keyboard.type(clean_value)
-            page.wait_for_timeout(500)
-            page.keyboard.press("Enter")
-            page.wait_for_timeout(800)
-        except:
-            pass
+            log(
+                f"❌ Could not select {field_id} "
+                f"('{clean_value}'): {str(e)}"
+            )
+
+        return False
 
 # ------------------------------------------------------------------------------
 # WEIGHT AND DOG SIZE
@@ -373,7 +377,8 @@ def add_microchip(page, animal, log):
 # ------------------------------------------------------------------------------
 # INTAKE NEW SUBMITTER LAYER (PATHWAY A)
 # ------------------------------------------------------------------------------
-def submit_animal(page, log):
+
+def submit_animal(page, log, owner_page=None, animal_name=None):
     log("🚀 Submitting animal intake parameters")
 
     btn = page.locator('[data-cy="submit-form"]')
@@ -395,7 +400,8 @@ def submit_animal(page, log):
     duplicate_retry_used = False
 
     for _ in range(100):
-        # Successful submission: the animal intake form has disappeared.
+
+        # Normal success: intake form disappears.
         if form_anchor.count() == 0 or not form_anchor.is_visible():
             log("🎉 Animal intake submitted successfully (Form closed)")
             return should_register_fi
@@ -426,6 +432,7 @@ def submit_animal(page, log):
                 should_register_fi = False
 
                 log("🚀 Retrying animal submission without a registered microchip.")
+
                 btn.wait_for(state="visible", timeout=10000)
                 btn.click()
                 page.wait_for_timeout(300)
@@ -452,6 +459,7 @@ def submit_animal(page, log):
             duplicate_retry_used = True
 
             log("🚀 Retrying animal submission after duplicate-microchip guard.")
+
             btn.wait_for(state="visible", timeout=10000)
             btn.click()
             page.wait_for_timeout(300)
@@ -459,12 +467,52 @@ def submit_animal(page, log):
 
         page.wait_for_timeout(200)
 
-    # Do not silently treat a form that remains open as a successful submission.
-    if form_anchor.count() > 0 and form_anchor.is_visible():
-        raise TimeoutError(
-            "Animal intake form remained open after submission attempts. "
-            "Check Shelterluv for validation errors."
+    # --------------------------------------------------------------
+    # SECONDARY SUCCESS VERIFICATION
+    # --------------------------------------------------------------
+    # Shelterluv may successfully create the animal while leaving
+    # the intake form visible. Verify against the owner's profile
+    # before deciding that submission failed.
+
+    if owner_page is not None and animal_name:
+        log(
+            "⚠️ Intake form remained visible. "
+            "Checking owner's profile for the submitted animal..."
         )
 
-    log("🎉 Animal intake finalized successfully.")
-    return should_register_fi
+        for _ in range(30):
+            try:
+                owner_links = owner_page.locator("a[href*='/animal/']")
+
+                for i in range(owner_links.count()):
+                    link = owner_links.nth(i)
+
+                    try:
+                        link_text = link.inner_text().strip()
+
+                        if animal_name_matches(link_text, animal_name):
+                            log(
+                                f"✅ Independent verification: "
+                                f"{animal_name} exists on the owner's profile."
+                            )
+                            log(
+                                "➡️ Continuing workflow without resubmitting "
+                                "the animal."
+                            )
+                            return should_register_fi
+
+                    except Exception:
+                        continue
+
+            except Exception:
+                pass
+
+            owner_page.wait_for_timeout(500)
+
+    # No independent confirmation. Do not retry automatically,
+    # because the animal may already exist.
+    raise TimeoutError(
+        f"Animal '{animal_name or 'Unknown'}' intake form remained open "
+        "and could not be independently verified on the owner's profile. "
+        "No further submission attempt was made to prevent duplicates."
+    )

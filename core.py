@@ -320,7 +320,12 @@ def run_automation(
                     add_microchip(target_tab, animal, log_safe)
                     
                     # Capture flag status from submission guard step (False if duplicate microchip intercepted)
-                    should_register_fi = submit_animal(target_tab, log_safe)
+                    should_register_fi = submit_animal(
+                        target_tab,
+                        log_safe,
+                        owner_page=page,
+                        animal_name=target_name
+                    )
                     
                     log_safe("🔄 Landing back on owner profile. Locating fresh link to open medical context...")
                     page.wait_for_load_state("networkidle")
